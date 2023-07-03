@@ -2,14 +2,14 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"sort"
-	"strconv"
-
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/shirou/gopsutil/process"
+	"os"
+	"os/exec"
+	"sort"
+	"strconv"
 )
 
 var baseStyle = lipgloss.NewStyle().
@@ -43,8 +43,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "enter":
+			killAllProcesses(m.table.SelectedRow()[1])
 			return m, tea.Batch(
-				tea.Printf("Let's go to %s!", m.table.SelectedRow()[1]),
+				tea.Printf("process %s killed!", m.table.SelectedRow()[1]),
 			)
 		}
 	}
@@ -56,10 +57,20 @@ func (m model) View() string {
 	return baseStyle.Render(m.table.View()) + "\n"
 }
 
+func killAllProcesses(processName string) error {
+	cmd := exec.Command("pkill", "-f", processName)
+	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	columns := []table.Column{
 		{Title: "pid", Width: 15},
-		{Title: "name", Width: 25},
+		{Title: "name", Width: 30},
 		{Title: "cpu usage", Width: 15},
 		{Title: "ram usage", Width: 15},
 	}
@@ -72,28 +83,33 @@ func main() {
 
 	currentPID := int32(os.Getpid())
 
-	processes := make([]*Process, 0)
+	processes := make(map[int32]*Process)
 	for _, p := range allProcesses {
 		cpuPercent, _ := p.CPUPercent()
 		processName, _ := p.Name()
 		ramPercent, _ := p.MemoryPercent()
 		if cpuPercent > 0 && p.Pid != currentPID {
-			processes = append(processes, &Process{pid: p.Pid, cpu: cpuPercent, name: processName, ram: ramPercent})
+			processes[p.Pid] = &Process{pid: p.Pid, cpu: cpuPercent, name: processName, ram: ramPercent}
 		}
 	}
 
-	sort.SliceStable(processes, func(i, j int) bool {
-		return processes[i].cpu > processes[j].cpu
+	processSlice := make([]*Process, 0, len(processes))
+	for _, p := range processes {
+		processSlice = append(processSlice, p)
+	}
+
+	sort.SliceStable(processSlice, func(i, j int) bool {
+		return processSlice[i].cpu > processSlice[j].cpu
 	})
 
-	limit := 5
-	if len(processes) < limit {
-		limit = len(processes)
+	limit := len(processes)
+	if len(processSlice) < limit {
+		limit = len(processSlice)
 	}
 
 	rows := make([]table.Row, limit)
 	for i := 0; i < limit; i++ {
-		p := processes[i]
+		p := processSlice[i]
 		rows[i] = table.Row{
 			strconv.Itoa(int(p.pid)),
 			p.name,
@@ -112,7 +128,7 @@ func main() {
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(lipgloss.Color("257")).
 		BorderBottom(true).
 		Bold(false)
 	s.Selected = s.Selected.
